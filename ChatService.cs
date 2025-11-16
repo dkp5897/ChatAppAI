@@ -12,6 +12,8 @@ public class ChatService (Client client, string model, string SystemPrompt, stri
     private readonly string _model = model ?? "gemini-2.0-flash";
     private readonly string _systemPrompt = SystemPrompt ?? "You are a helpful assistant.";
     private readonly List<Message> _conversationHistory = [];
+    // When history grows beyond this many messages, compress it with summarization
+    private const int HistoryThreshold = 12;
 
     // Polly retry: retry 3 times with exponential backoff for transient exceptions
     
@@ -37,6 +39,12 @@ public class ChatService (Client client, string model, string SystemPrompt, stri
         
         AddSystemPromptIfMissing();
         _conversationHistory.Add(new Message(userName, userMessage));
+
+        // If history is too long, compress older messages
+        if(_conversationHistory.Count(m => m.Role != "system") > HistoryThreshold)
+        {
+            await CompressHistoryAsync(cancellationToken);
+        }
 
         var formattedMessages = FormatMessages();
 
@@ -79,5 +87,47 @@ public class ChatService (Client client, string model, string SystemPrompt, stri
         _conversationHistory.Clear();
     }
 
+    public async Task CompressHistoryAsync(CancellationToken cancellationToken)
+    {
+            // Summarize older messages into a concise summary and replace them.
+            // Keep the system prompt and last few messages for context.
 
+            var systemPrompt = _conversationHistory.FirstOrDefault(m => m.Role == "system");
+            var recentMessage = _conversationHistory.Where(m => m.Role != "system")
+                                                    .Reverse()
+                                                    .Take(6)
+                                                    .Reverse()
+                                                    .ToList();
+            var toSummarize = _conversationHistory.Where(m => m.Role != "system")
+                                                .Except(recentMessage)
+                                                .ToList();
+            if(toSummarize.Count == 0)
+                return ;
+            
+            var summarizationPrompt = "Summarize the following conversation into a short bulleted summary, keeping key facts and user intents. " +
+                                      "Do not invent new facts. Conversation:\n\n" +
+                                      string.Join("\n\n", toSummarize.Select(m => $"{m?.Role?.ToUpper()}: {m?.Content}"));
+            // call model to summarize
+            var summaryResponse = await _client.Models.GenerateContentAsync(
+                model: model,
+                contents: summarizationPrompt
+            );
+
+            var summary = summaryResponse?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? "Summary unavailable.";
+
+            // Replace older messages with a single assistant/system note that contains the summary
+            var newHistory = new List<Message>();
+            if(systemPrompt != null)
+                newHistory.Add(systemPrompt);
+            
+            newHistory.Add(new Message("assistance", $"Conversation summary: {summary}"));
+            // add the recent messages back
+            newHistory.AddRange(recentMessage);
+
+            _conversationHistory.Clear();
+            _conversationHistory.AddRange(newHistory);
+
+            // small delay to respect rate limits (optional)
+            // await Task.Delay(10, cancellationToken);
+    }
 }
