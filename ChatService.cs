@@ -32,7 +32,7 @@ public class ChatService (Client client, string model, string SystemPrompt, stri
         }
     }
 
-    public async Task<string> SendAsync(string userMessage, CancellationToken cancellationToken = default)
+    public async Task<string> SendResponseAsync(string userMessage, CancellationToken cancellationToken = default)
     {
         if(string.IsNullOrWhiteSpace(userMessage))
             return string.Empty;
@@ -71,6 +71,57 @@ public class ChatService (Client client, string model, string SystemPrompt, stri
         }
 
         return "Sorry, I couldn't generate a response.";
+
+    }
+
+    //send streaming response
+    public async Task SendStreamingResponseAsyn(string userMessage, CancellationToken cancellationToken = default)
+    {
+        if(string.IsNullOrWhiteSpace(userMessage))
+            return;
+        
+        AddSystemPromptIfMissing();
+        _conversationHistory.Add(new Message(userName, userMessage));
+
+        // If history is too long, compress older messages
+        if(_conversationHistory.Count(m => m.Role != "system") > HistoryThreshold)
+        {
+            await CompressHistoryAsync(cancellationToken);
+        }
+
+        var formattedMessages = FormatMessages();
+
+        string responseContent = string.Empty;
+
+        //use Polly retry policy to send request
+        await _retryPolicy.ExecuteAsync(async (ct) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write("DK-AI: ");
+            await foreach(var chunk in _client.Models.GenerateContentStreamAsync(
+                model: model,
+                contents: formattedMessages
+            ))
+            {
+                if(chunk == null) continue;
+
+                string partial = chunk?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
+
+                if (!string.IsNullOrEmpty(partial))
+                {
+
+                    Console.Write(partial);
+                }
+
+                if(chunk?.Candidates?[0].FinishMessage == "response.complete")
+                {
+                    break;
+                }
+            }
+            Console.ResetColor();
+            Console.WriteLine();
+        }, cancellationToken);
 
     }
 

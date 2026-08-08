@@ -12,7 +12,7 @@ public class Program
     {
         var config = new ConfigurationBuilder().AddUserSecrets<Program>().Build();
         var apiKey = config["GoogleAPIKey1"] ?? string.Empty;
-        var modelName = config["GoogleAIModal"] ?? "gemini-2.0-flash";
+        var modelName = config["GoogleAIModel"] ?? "gemini-3.5-flash-lite";
         if (string.IsNullOrWhiteSpace(apiKey))
         {
           Console.WriteLine("API Key is missing. Please set it in User Secrets.");
@@ -20,7 +20,7 @@ public class Program
         }
 
         var client = new Client(apiKey: apiKey);
-        string systemPrompt = "You are a helpful assistant in an interactive console app. Keep answers concise unless asked for more.";
+        string systemPrompt = "You are a helpful assistant in an interactive console app. Keep answers briefly unless asked for explain properly.";
 
         Console.WriteLine("Welcome to Gemini Chat! Type your question, or 'exit' to quit. Type '/help' for commands.");
         Console.WriteLine("Your name please: ");
@@ -95,11 +95,15 @@ public class Program
 
           try
           {
-            var response = await chat.SendAsync(userInput, cts.Token);
-            //AI response colur 
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"DK-AI: {response}");
-            Console.ResetColor();
+            // var response = await chat.SendResponseAsync(userInput, cts.Token);
+            // //AI response colur 
+            // Console.ForegroundColor = ConsoleColor.Yellow;
+            // Console.WriteLine($"DK-AI: {response}");
+            // Console.ResetColor();
+
+            //genrate streaminig response
+
+            await chat.SendStreamingResponseAsyn(userInput, cts.Token);
 
           }
           catch (OperationCanceledException)
